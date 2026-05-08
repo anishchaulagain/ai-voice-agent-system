@@ -73,6 +73,12 @@ async def _generate_and_speak_reply(ws: WebSocket, session: conversation.Session
             await _speak(ws, clean)
 
     clean_full, ended = conversation.strip_end_token(full_text)
+    if ended and not session.can_end():
+        log.info(
+            "model tried to end call after only %d user turn(s); suppressing",
+            session.user_turns,
+        )
+        ended = False
     session.append_assistant(clean_full)
     await _send_json(
         ws,

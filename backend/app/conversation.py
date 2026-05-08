@@ -6,11 +6,16 @@ from app.prompts import SYSTEM_PROMPT
 END_CALL_TOKEN = "<END_CALL>"
 OPENER = "Hi, this is Maya calling from Nexbizio — do you have a quick minute?"
 
+# Safety net: ignore the model's <END_CALL> until the caller has actually engaged
+# this many turns. Prevents the agent from hanging up on the first user reply.
+MIN_USER_TURNS_BEFORE_END = 4
+
 
 @dataclass
 class Session:
     id: str
     messages: list[dict] = field(default_factory=list)
+    user_turns: int = 0
     ended: bool = False
 
     def history_for_llm(self) -> list[dict]:
@@ -18,9 +23,13 @@ class Session:
 
     def append_user(self, text: str) -> None:
         self.messages.append({"role": "user", "content": text})
+        self.user_turns += 1
 
     def append_assistant(self, text: str) -> None:
         self.messages.append({"role": "assistant", "content": text})
+
+    def can_end(self) -> bool:
+        return self.user_turns >= MIN_USER_TURNS_BEFORE_END
 
 
 _sessions: dict[str, Session] = {}
