@@ -62,7 +62,10 @@ async def _synthesize_elevenlabs(text: str) -> AsyncIterator[bytes]:
         voice_id=settings.elevenlabs_voice_id,
         text=text,
         model_id=settings.elevenlabs_model,
-        output_format="mp3_44100_128",
+        # Lower bitrate = faster first byte over the wire, still fine for voice.
+        output_format="mp3_44100_64",
+        # 0=default quality, 4=max latency optimization. 3 is the sweet spot.
+        optimize_streaming_latency=3,
     )
     async for chunk in stream:
         if chunk:
