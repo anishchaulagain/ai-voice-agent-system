@@ -27,7 +27,8 @@ async def stream_reply(messages: list[dict]) -> AsyncIterator[str]:
     stream = await client.chat.completions.create(
         model=model,
         messages=messages,
-        temperature=0.7,
+        temperature=0.6,
+        max_tokens=160,  # Maya is told to keep replies to 1-2 sentences; cap enforces faster completion
         stream=True,
     )
     async for chunk in stream:

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from app.prompts import SYSTEM_PROMPT
 
 END_CALL_TOKEN = "<END_CALL>"
-OPENER = "Hi, this is Maya calling from Nexbizio — do you have a quick minute?"
+OPENER = "Hi, this is Anish calling from Nexbizio — do you have a quick minute?"
 
 # Safety net: ignore the model's <END_CALL> until the caller has actually engaged
 # this many turns. Prevents the agent from hanging up on the first user reply.
