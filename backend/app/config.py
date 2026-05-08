@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     stt_provider: Literal["openai", "groq"] = "openai"
     llm_provider: Literal["openai", "groq"] = "openai"
-    tts_provider: Literal["openai", "edge"] = "openai"
+    tts_provider: Literal["openai", "groq", "edge"] = "openai"
 
     openai_api_key: str = ""
     openai_stt_model: str = "whisper-1"
@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     groq_stt_model: str = "whisper-large-v3-turbo"
     groq_llm_model: str = "llama-3.3-70b-versatile"
+    groq_tts_model: str = "playai-tts"
+    groq_tts_voice: str = "Celeste-PlayAI"
     groq_base_url: str = "https://api.groq.com/openai/v1"
 
     host: str = "0.0.0.0"
