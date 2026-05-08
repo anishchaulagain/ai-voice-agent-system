@@ -2,6 +2,7 @@ import logging
 from collections.abc import AsyncIterator
 
 import edge_tts
+from elevenlabs.client import AsyncElevenLabs
 from openai import AsyncOpenAI
 
 from app.config import settings
@@ -53,11 +54,29 @@ async def _synthesize_edge(text: str) -> AsyncIterator[bytes]:
             yield event["data"]
 
 
+async def _synthesize_elevenlabs(text: str) -> AsyncIterator[bytes]:
+    if not settings.elevenlabs_api_key:
+        raise RuntimeError("ELEVENLABS_API_KEY is not set but TTS_PROVIDER=elevenlabs")
+    client = AsyncElevenLabs(api_key=settings.elevenlabs_api_key)
+    stream = client.text_to_speech.convert_as_stream(
+        voice_id=settings.elevenlabs_voice_id,
+        text=text,
+        model_id=settings.elevenlabs_model,
+        output_format="mp3_44100_128",
+    )
+    async for chunk in stream:
+        if chunk:
+            yield chunk
+
+
 async def synthesize(text: str) -> AsyncIterator[bytes]:
     """Yield audio chunks for the given text."""
     if not text or not text.strip():
         return
-    if settings.tts_provider == "groq":
+    if settings.tts_provider == "elevenlabs":
+        async for chunk in _synthesize_elevenlabs(text):
+            yield chunk
+    elif settings.tts_provider == "groq":
         async for chunk in _synthesize_groq(text):
             yield chunk
     elif settings.tts_provider == "edge":
@@ -69,6 +88,6 @@ async def synthesize(text: str) -> AsyncIterator[bytes]:
 
 
 def audio_mime_type() -> str:
-    # Groq returns wav; OpenAI/Edge return mp3. The browser <audio> element
-    # detects the format from the bytes, so a generic type works for both.
-    return "audio/mpeg" if settings.tts_provider != "groq" else "audio/wav"
+    # Groq's TTS returns wav; everyone else returns mp3. Browser <audio>
+    # sniffs the format from the bytes anyway, so this is mainly informational.
+    return "audio/wav" if settings.tts_provider == "groq" else "audio/mpeg"

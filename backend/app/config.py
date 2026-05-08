@@ -12,7 +12,7 @@ class Settings(BaseSettings):
 
     stt_provider: Literal["openai", "groq"] = "openai"
     llm_provider: Literal["openai", "groq"] = "openai"
-    tts_provider: Literal["openai", "groq", "edge"] = "openai"
+    tts_provider: Literal["openai", "groq", "edge", "elevenlabs"] = "openai"
 
     openai_api_key: str = ""
     openai_stt_model: str = "whisper-1"
@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     groq_tts_model: str = "playai-tts"
     groq_tts_voice: str = "Celeste-PlayAI"
     groq_base_url: str = "https://api.groq.com/openai/v1"
+
+    elevenlabs_api_key: str = ""
+    # Default: "Jessica" — works on free tier. Most "library" voices (Rachel, Aria, Charlotte)
+    # are paywalled; Jessica is one of the few default voices free accounts can call via API.
+    elevenlabs_voice_id: str = "cgSgspJ2msm6clMCkdW9"
+    # turbo_v2_5 = best latency/quality for voice agents. Alternatives: eleven_flash_v2_5, eleven_multilingual_v2.
+    elevenlabs_model: str = "eleven_turbo_v2_5"
 
     host: str = "0.0.0.0"
     port: int = 8000
