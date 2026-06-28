@@ -28,9 +28,10 @@ class Settings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1"
 
     elevenlabs_api_key: str = ""
-    # Default: "Jessica" — works on free tier. Most "library" voices (Rachel, Aria, Charlotte)
-    # are paywalled; Jessica is one of the few default voices free accounts can call via API.
-    elevenlabs_voice_id: str = "cgSgspJ2msm6clMCkdW9"
+    # Default: "Sarah" (soft, professional US female) — works on free tier. Most "library"
+    # voices (Rachel, Aria, Charlotte) are paywalled; only a handful of default voices
+    # (Sarah, Matilda, Jessica, Laura, River) are callable via API on free accounts.
+    elevenlabs_voice_id: str = "EXAVITQu4vr4xnSDxMaL"
     # turbo_v2_5 = best latency/quality for voice agents. Alternatives: eleven_flash_v2_5, eleven_multilingual_v2.
     elevenlabs_model: str = "eleven_turbo_v2_5"
 
