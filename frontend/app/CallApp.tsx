@@ -18,16 +18,22 @@ type Status =
   | "ended"
   | "error";
 
-const SILENCE_RMS_THRESHOLD = 0.012; // 0..1, tune for mic
-const MIN_SPEECH_MS = 250;
-const SILENCE_HANGOVER_MS = 900;
-const POLL_INTERVAL_MS = 60;
+const SILENCE_RMS_THRESHOLD = 0.018; // 0..1, tune for mic; higher = less sensitive to noise
+const MIN_SPEECH_MS = 400; // first contiguous burst must last this long to count as speech
+const MIN_TOTAL_SPEECH_MS = 600; // minimum cumulative speech in an utterance before we send it; rejects brief noise bursts
+const SILENCE_HANGOVER_MS = 550; // ms of silence before we flush to backend; lower = snappier, higher = patient with slow speakers
+const POST_AGENT_COOLDOWN_MS = 300; // ignore mic for this long after the agent stops speaking, to avoid speaker tail-bleed
+const POLL_INTERVAL_MS = 50;
+
+// Amplitude (RMS) that maps to a "fully open" orb.
+const AMP_FULL = 0.22;
 
 export default function CallApp() {
   const [status, setStatus] = useState<Status>("idle");
   const [turns, setTurns] = useState<Turn[]>([]);
   const [partial, setPartial] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [seconds, setSeconds] = useState(0);
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -44,6 +50,16 @@ export default function CallApp() {
 
   const speechStartedAtRef = useRef<number | null>(null);
   const lastVoiceAtRef = useRef<number | null>(null);
+  const totalSpeechMsRef = useRef(0);
+  const cooldownUntilRef = useRef(0);
+  const discardNextRef = useRef(false);
+
+  // Orb animation plumbing (imperative — driven by refs, never re-renders).
+  const orbRef = useRef<HTMLDivElement | null>(null);
+  const levelRef = useRef(0); // latest mic RMS
+  const ampSmoothRef = useRef(0);
+  const statusRef = useRef<Status>("idle");
+  const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
   const log = useCallback((..._args: unknown[]) => {
     if (process.env.NODE_ENV !== "production") {
@@ -63,6 +79,7 @@ export default function CallApp() {
     const next = audioQueueRef.current.shift();
     if (!next) {
       isAgentSpeakingRef.current = false;
+      cooldownUntilRef.current = performance.now() + POST_AGENT_COOLDOWN_MS;
       setStatus((s) => (s === "agent-speaking" ? "listening" : s));
       return;
     }
@@ -116,7 +133,14 @@ export default function CallApp() {
     rec.onstop = () => {
       const ws = wsRef.current;
       const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
-      if (ws && ws.readyState === WebSocket.OPEN && blob.size > 0) {
+      const discard = discardNextRef.current;
+      discardNextRef.current = false;
+      if (
+        !discard &&
+        ws &&
+        ws.readyState === WebSocket.OPEN &&
+        blob.size > 0
+      ) {
         blob.arrayBuffer().then((buf) => {
           ws.send(buf);
           ws.send(JSON.stringify({ type: "user_audio_end" }));
@@ -127,6 +151,7 @@ export default function CallApp() {
       if (status !== "ended") {
         speechStartedAtRef.current = null;
         lastVoiceAtRef.current = null;
+        totalSpeechMsRef.current = 0;
         startRecorder();
       }
     };
@@ -141,6 +166,8 @@ export default function CallApp() {
 
     vadTimerRef.current = window.setInterval(() => {
       if (isAgentSpeakingRef.current) return;
+      const now = performance.now();
+      if (now < cooldownUntilRef.current) return;
 
       analyser.getByteTimeDomainData(buf);
       let sumSq = 0;
@@ -149,7 +176,7 @@ export default function CallApp() {
         sumSq += v * v;
       }
       const rms = Math.sqrt(sumSq / buf.length);
-      const now = performance.now();
+      levelRef.current = rms; // feed the orb
       const speaking = rms > SILENCE_RMS_THRESHOLD;
 
       if (speaking) {
@@ -158,6 +185,7 @@ export default function CallApp() {
           setStatus("user-speaking");
         }
         lastVoiceAtRef.current = now;
+        totalSpeechMsRef.current += POLL_INTERVAL_MS;
       } else if (
         speechStartedAtRef.current !== null &&
         lastVoiceAtRef.current !== null
@@ -165,6 +193,11 @@ export default function CallApp() {
         const speechDur = now - speechStartedAtRef.current;
         const silenceDur = now - lastVoiceAtRef.current;
         if (speechDur >= MIN_SPEECH_MS && silenceDur >= SILENCE_HANGOVER_MS) {
+          // Only send to backend if there was enough actual speech.
+          // Otherwise it's just background noise — discard silently.
+          if (totalSpeechMsRef.current < MIN_TOTAL_SPEECH_MS) {
+            discardNextRef.current = true;
+          }
           flushUtterance();
         }
       }
@@ -192,6 +225,7 @@ export default function CallApp() {
     audioQueueRef.current = [];
     audioBufferRef.current = [];
     isAgentSpeakingRef.current = false;
+    levelRef.current = 0;
   }, [stopVad]);
 
   const handleServerMessage = useCallback(
@@ -207,8 +241,13 @@ export default function CallApp() {
           log("session", msg.session_id);
           break;
         case "user_transcript": {
-          const text = String(msg.text ?? "");
-          appendTurn("caller", text || "(no speech detected)");
+          const text = String(msg.text ?? "").trim();
+          if (text) {
+            appendTurn("caller", text);
+          } else {
+            // Server filtered out a hallucination or empty utterance — go back to listening silently.
+            setStatus((s) => (s === "thinking" ? "listening" : s));
+          }
           break;
         }
         case "assistant_text_delta": {
@@ -255,6 +294,7 @@ export default function CallApp() {
     setErrorMsg(null);
     setTurns([]);
     setPartial("");
+    setSeconds(0);
     partialRef.current = "";
     setStatus("connecting");
 
@@ -269,7 +309,7 @@ export default function CallApp() {
       });
     } catch (e) {
       setStatus("error");
-      setErrorMsg("Microphone permission denied or unavailable.");
+      setErrorMsg("Microphone access is blocked. Allow it, then start the call again.");
       log("getUserMedia failed", e);
       return;
     }
@@ -304,7 +344,7 @@ export default function CallApp() {
     };
     ws.onerror = (e) => {
       log("ws error", e);
-      setErrorMsg("WebSocket error — is the backend running?");
+      setErrorMsg("Couldn't reach the call server. Check that the backend is running.");
       setStatus("error");
     };
     ws.onclose = () => {
@@ -325,69 +365,171 @@ export default function CallApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keep a ref copy of status for the rAF loop.
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
   const inCall = status !== "idle" && status !== "ended" && status !== "error";
 
+  // Call timer — ticks while a call is live, holds its final value afterwards.
+  useEffect(() => {
+    if (!inCall) return;
+    const id = window.setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [inCall]);
+
+  // Auto-scroll transcript to the newest turn.
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [turns, partial]);
+
+  // The orb's heartbeat: translate call state + live amplitude into a single
+  // smoothed `--amp` the CSS reads. Mic levels are real; Maya's speech (no mic
+  // analyser) gets an organic synthetic motion so she still feels alive.
+  useEffect(() => {
+    let raf = 0;
+    const tick = () => {
+      const el = orbRef.current;
+      if (el) {
+        const s = statusRef.current;
+        let target = 0;
+        if (s === "user-speaking") {
+          target = Math.min(1, levelRef.current / AMP_FULL);
+        } else if (s === "listening") {
+          target = 0.1 + Math.min(0.25, (levelRef.current / AMP_FULL) * 0.25);
+        } else if (s === "agent-speaking") {
+          const t = performance.now() / 1000;
+          const wobble =
+            0.5 + 0.5 * Math.sin(t * 7.3) * (0.6 + 0.4 * Math.sin(t * 2.9));
+          target = 0.42 + 0.4 * wobble;
+        } else if (s === "thinking" || s === "connecting") {
+          target = 0.18;
+        }
+        // critically-damped-ish smoothing toward target
+        ampSmoothRef.current += (target - ampSmoothRef.current) * 0.16;
+        el.style.setProperty("--amp", ampSmoothRef.current.toFixed(3));
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   return (
-    <div className="flex flex-col flex-1 items-center bg-zinc-50 dark:bg-black min-h-screen">
-      <main className="flex flex-col w-full max-w-2xl px-6 py-12 gap-8">
-        <header className="flex flex-col gap-2">
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-            Nexbizio Calling Agent
-          </h1>
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Browser-based POC. Click <strong>Start call</strong>, allow mic
-            access, and talk to Maya — she&apos;ll pitch Nexbizio and respond
-            naturally.
-          </p>
+    <main className="flex flex-1 flex-col items-center px-5 py-10 sm:py-14">
+      <div className="flex w-full max-w-3xl flex-col gap-10">
+        {/* masthead */}
+        <header className="flex items-center justify-between">
+          <div className="flex items-baseline gap-2.5">
+            <span className="font-display text-xl font-semibold tracking-tight text-text">
+              Nexbizio
+            </span>
+            <span className="mono text-[0.62rem] uppercase tracking-[0.22em] text-dim">
+              Voice Agent
+            </span>
+          </div>
+          <Telemetry status={status} seconds={seconds} />
         </header>
 
-        <div className="flex items-center gap-4">
-          {!inCall ? (
-            <button
-              onClick={startCall}
-              className="rounded-full bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 font-medium transition-colors"
-            >
-              Start call
-            </button>
-          ) : (
-            <button
-              onClick={endCall}
-              className="rounded-full bg-red-600 hover:bg-red-700 text-white px-6 py-3 font-medium transition-colors"
-            >
-              End call
-            </button>
-          )}
-          <StatusPill status={status} />
-        </div>
+        {/* hero: the call console */}
+        <section className="flex flex-col items-center gap-7 pt-2 text-center">
+          <Orb ref={orbRef} status={status} />
 
-        {errorMsg && (
-          <div className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800 dark:bg-red-950/40 dark:border-red-800/60 dark:text-red-200">
-            {errorMsg}
+          <div className="flex flex-col items-center gap-1.5">
+            <h1 className="font-display text-[1.7rem] font-medium leading-tight tracking-tight text-text">
+              {headline(status)}
+            </h1>
+            <p className="max-w-md text-sm leading-relaxed text-dim">
+              {subline(status)}
+            </p>
           </div>
-        )}
 
-        <section className="flex flex-col gap-3">
-          <h2 className="text-sm uppercase tracking-wide text-zinc-500">
-            Transcript
-          </h2>
-          <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-4 min-h-[280px] flex flex-col gap-3">
-            {turns.length === 0 && !partial && (
-              <p className="text-zinc-400 text-sm italic">
-                Transcript will appear here once the call begins.
-              </p>
+          <div className="flex flex-col items-center gap-3">
+            {!inCall ? (
+              <button onClick={startCall} className="btn-call btn-start">
+                <span className="btn-dot" />
+                {status === "ended" || status === "error"
+                  ? "Call again"
+                  : "Start call"}
+              </button>
+            ) : (
+              <button onClick={endCall} className="btn-call btn-end">
+                <span className="btn-dot" />
+                End call
+              </button>
             )}
-            {turns.map((t, i) => (
-              <TurnRow key={i} role={t.role} text={t.text} />
-            ))}
-            {partial && <TurnRow role="agent" text={partial} pending />}
           </div>
+
+          {errorMsg && (
+            <div
+              role="alert"
+              className="mt-1 max-w-md rounded-lg border border-[rgba(255,107,107,0.4)] bg-[rgba(255,107,107,0.08)] px-4 py-3 text-sm text-[#ffb4b4]"
+            >
+              {errorMsg}
+            </div>
+          )}
         </section>
 
-        <audio ref={playbackElRef} hidden />
-      </main>
-    </div>
+        {/* transcript */}
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <h2 className="mono text-[0.66rem] uppercase tracking-[0.16em] text-dim">
+              Transcript
+            </h2>
+            {turns.length > 0 && (
+              <span className="mono text-[0.66rem] text-dim">
+                {turns.length} {turns.length === 1 ? "turn" : "turns"}
+              </span>
+            )}
+          </div>
+
+          <div className="glass scroll-area flex max-h-[42vh] min-h-[200px] flex-col gap-4 overflow-y-auto rounded-2xl p-5">
+            {turns.length === 0 && !partial ? (
+              <div className="m-auto flex flex-col items-center gap-1.5 py-8 text-center">
+                <p className="font-display text-sm text-dim">
+                  No words exchanged yet
+                </p>
+                <p className="max-w-xs text-xs leading-relaxed text-[var(--text-faint)]">
+                  Start the call and say hello. Everything you and Maya say lands
+                  here, line by line.
+                </p>
+              </div>
+            ) : (
+              <>
+                {turns.map((t, i) => (
+                  <TurnRow key={i} role={t.role} text={t.text} />
+                ))}
+                {partial && <TurnRow role="agent" text={partial} pending />}
+                <div ref={transcriptEndRef} />
+              </>
+            )}
+          </div>
+        </section>
+      </div>
+
+      <audio ref={playbackElRef} hidden />
+    </main>
   );
 }
+
+const Orb = ({
+  ref,
+  status,
+}: {
+  ref: React.Ref<HTMLDivElement>;
+  status: Status;
+}) => {
+  return (
+    <div ref={ref} className="orb-stage" data-state={status}>
+      <div className="orb-ring r1" />
+      <div className="orb-ring r2" />
+      <div className="orb-ring r3" />
+      <div className="orb-arc" />
+      <div className="orb-core" />
+    </div>
+  );
+};
 
 function TurnRow({
   role,
@@ -400,49 +542,97 @@ function TurnRow({
 }) {
   const isAgent = role === "agent";
   return (
-    <div className="flex gap-3">
-      <span
-        className={`shrink-0 text-xs font-semibold px-2 py-1 rounded ${
-          isAgent
-            ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200"
-            : "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200"
-        }`}
-      >
+    <div className="turn-in flex gap-3">
+      <span className={`turn-tag shrink-0 ${isAgent ? "agent" : "caller"}`}>
         {isAgent ? "Maya" : "You"}
       </span>
       <p
-        className={`text-sm text-zinc-800 dark:text-zinc-200 ${
-          pending ? "opacity-70" : ""
+        className={`text-sm leading-relaxed text-text/90 ${
+          pending ? "opacity-80" : ""
         }`}
       >
         {text}
-        {pending && <span className="animate-pulse">▌</span>}
+        {pending && <span className="caret">.</span>}
       </p>
     </div>
   );
 }
 
-function StatusPill({ status }: { status: Status }) {
-  const map: Record<Status, { label: string; cls: string }> = {
-    idle: { label: "Idle", cls: "bg-zinc-200 text-zinc-700" },
-    connecting: { label: "Connecting…", cls: "bg-amber-200 text-amber-900" },
-    listening: { label: "Listening", cls: "bg-emerald-200 text-emerald-900" },
-    "user-speaking": {
-      label: "You speaking…",
-      cls: "bg-blue-200 text-blue-900",
-    },
-    thinking: { label: "Thinking…", cls: "bg-amber-200 text-amber-900" },
-    "agent-speaking": {
-      label: "Maya speaking…",
-      cls: "bg-emerald-200 text-emerald-900",
-    },
-    ended: { label: "Call ended", cls: "bg-zinc-300 text-zinc-700" },
-    error: { label: "Error", cls: "bg-red-200 text-red-900" },
-  };
-  const { label, cls } = map[status];
+function Telemetry({ status, seconds }: { status: Status; seconds: number }) {
+  const live = status !== "idle" && status !== "ended" && status !== "error";
+  const label =
+    status === "idle"
+      ? "Standby"
+      : status === "ended"
+        ? "Ended"
+        : status === "error"
+          ? "Offline"
+          : "Live";
   return (
-    <span className={`rounded-full px-3 py-1 text-xs font-medium ${cls}`}>
-      {label}
-    </span>
+    <div
+      className="orb-stage flex items-center gap-2"
+      data-state={status}
+      style={{ width: "auto", height: "auto" }}
+    >
+      <span className={`live-dot ${live ? "pulsing" : ""}`} />
+      <span className="mono text-[0.7rem] uppercase tracking-[0.14em] text-dim">
+        {label}
+      </span>
+      {(live || status === "ended") && (
+        <span className="mono text-[0.7rem] tabular-nums text-text/70">
+          {fmt(seconds)}
+        </span>
+      )}
+    </div>
   );
+}
+
+function fmt(total: number) {
+  const m = Math.floor(total / 60)
+    .toString()
+    .padStart(2, "0");
+  const s = (total % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
+}
+
+function headline(status: Status): string {
+  switch (status) {
+    case "idle":
+      return "Talk to Maya";
+    case "connecting":
+      return "Connecting…";
+    case "listening":
+      return "Listening";
+    case "user-speaking":
+      return "Go ahead, I'm with you";
+    case "thinking":
+      return "Thinking it through…";
+    case "agent-speaking":
+      return "Maya's speaking";
+    case "ended":
+      return "Call ended";
+    case "error":
+      return "Call interrupted";
+  }
+}
+
+function subline(status: Status): string {
+  switch (status) {
+    case "idle":
+      return "Maya is the Nexbizio voice agent. Start the call, allow your mic, and have a real conversation about the B2B marketplace.";
+    case "connecting":
+      return "Setting up the line and waking Maya up.";
+    case "listening":
+      return "The line is open. Just start talking whenever you're ready.";
+    case "user-speaking":
+      return "Keep going — Maya picks up when you pause.";
+    case "thinking":
+      return "Maya is working out a reply.";
+    case "agent-speaking":
+      return "Listen in. You can jump back in as soon as she finishes.";
+    case "ended":
+      return "Thanks for talking with Maya. Start another call whenever you like.";
+    case "error":
+      return "The connection dropped. You can try the call again.";
+  }
 }

@@ -1,26 +1,393 @@
 @import "tailwindcss";
 
+/* ============================================================
+   The Line — a voice-first call console for Nexbizio's agent
+   ============================================================ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* console */
+  --ink: #080b16;
+  --ink-2: #0c1322;
+  --panel: rgba(18, 25, 45, 0.55);
+  --panel-solid: #10172a;
+  --line: #1e2740;
+  --line-soft: rgba(120, 138, 184, 0.14);
+
+  /* text */
+  --text: #ecf1ff;
+  --text-dim: #8290b5;
+  --text-faint: #5a678c;
+
+  /* voices */
+  --caller: #66e0e8; /* you  */
+  --caller-glow: rgba(102, 224, 232, 0.45);
+  --maya: #ff8862; /* agent */
+  --maya-glow: rgba(255, 136, 98, 0.5);
+  --neutral: #8290b5;
+  --neutral-glow: rgba(130, 144, 181, 0.3);
+  --danger: #ff6b6b;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-ink: var(--ink);
+  --color-panel: var(--panel-solid);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-dim: var(--text-dim);
+  --color-caller: var(--caller);
+  --color-maya: var(--maya);
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--ink);
+  color: var(--text);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Ambient scene: a quiet deep-space console glow that sits behind everything */
+.scene {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(
+      120% 80% at 50% -10%,
+      rgba(255, 136, 98, 0.07) 0%,
+      transparent 55%
+    ),
+    radial-gradient(
+      100% 90% at 50% 120%,
+      rgba(102, 224, 232, 0.06) 0%,
+      transparent 50%
+    ),
+    linear-gradient(180deg, var(--ink) 0%, var(--ink-2) 60%, var(--ink) 100%);
+}
+
+/* faint grid, like a signal scope */
+.scene::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--line-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+  background-size: 64px 64px;
+  -webkit-mask-image: radial-gradient(
+    80% 60% at 50% 35%,
+    black 0%,
+    transparent 75%
+  );
+  mask-image: radial-gradient(80% 60% at 50% 35%, black 0%, transparent 75%);
+  opacity: 0.5;
+}
+
+/* ---------- typography helpers ---------- */
+.font-display {
+  font-family: var(--font-display), var(--font-sans), sans-serif;
+}
+.mono {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   Signature: the voice orb
+   ============================================================ */
+
+.orb-stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 300px;
+  height: 300px;
+  /* per-state accent, overridden below */
+  --accent: var(--neutral);
+  --glow: var(--neutral-glow);
+  /* live amplitude 0..1, written each frame by JS */
+  --amp: 0;
+}
+
+.orb-stage[data-state="listening"],
+.orb-stage[data-state="user-speaking"] {
+  --accent: var(--caller);
+  --glow: var(--caller-glow);
+}
+.orb-stage[data-state="thinking"],
+.orb-stage[data-state="agent-speaking"] {
+  --accent: var(--maya);
+  --glow: var(--maya-glow);
+}
+.orb-stage[data-state="error"] {
+  --accent: var(--danger);
+  --glow: rgba(255, 107, 107, 0.45);
+}
+
+.orb-ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  transition: border-color 0.6s ease;
+}
+.orb-ring.r1 {
+  width: 100%;
+  height: 100%;
+  opacity: 0.35;
+  transform: scale(calc(0.9 + var(--amp) * 0.28));
+}
+.orb-ring.r2 {
+  width: 74%;
+  height: 74%;
+  opacity: 0.55;
+  transform: scale(calc(0.92 + var(--amp) * 0.34));
+}
+.orb-ring.r3 {
+  width: 50%;
+  height: 50%;
+  opacity: 0.8;
+  transform: scale(calc(0.94 + var(--amp) * 0.4));
+}
+
+.orb-core {
+  position: relative;
+  width: 34%;
+  height: 34%;
+  border-radius: 50%;
+  background:
+    radial-gradient(
+      circle at 35% 30%,
+      color-mix(in srgb, var(--accent) 90%, white) 0%,
+      var(--accent) 45%,
+      color-mix(in srgb, var(--accent) 60%, var(--ink)) 100%
+    );
+  transform: scale(calc(1 + var(--amp) * 0.22));
+  box-shadow:
+    0 0 calc(30px + var(--amp) * 70px) var(--glow),
+    0 0 calc(70px + var(--amp) * 90px) var(--glow),
+    inset 0 0 24px rgba(255, 255, 255, 0.25);
+  transition: background 0.6s ease;
+}
+
+/* thinking: a sweeping arc around the core */
+.orb-arc {
+  position: absolute;
+  width: 58%;
+  height: 58%;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--accent);
+  border-right-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .orb-stage[data-state="idle"] .orb-core,
+  .orb-stage[data-state="connecting"] .orb-core,
+  .orb-stage[data-state="listening"] .orb-core {
+    animation: breathe 3.6s ease-in-out infinite;
+  }
+  .orb-stage[data-state="thinking"] .orb-arc {
+    opacity: 1;
+    animation: spin 1.1s linear infinite;
+  }
+  .orb-stage[data-state="connecting"] .orb-ring {
+    animation: ripple 2.4s ease-out infinite;
+  }
+  .orb-stage[data-state="connecting"] .orb-ring.r2 {
+    animation-delay: 0.4s;
+  }
+  .orb-stage[data-state="connecting"] .orb-ring.r1 {
+    animation-delay: 0.8s;
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ripple {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(1.25);
+    opacity: 0;
+  }
+}
+
+/* ============================================================
+   Controls
+   ============================================================ */
+
+.btn-call {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.85rem 1.6rem;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.25s ease,
+    background 0.25s ease;
+}
+.btn-call:active {
+  transform: translateY(1px) scale(0.99);
+}
+.btn-call:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 3px;
+}
+
+.btn-start {
+  background: linear-gradient(135deg, var(--maya) 0%, #ff6a3d 100%);
+  color: #1a0d08;
+  box-shadow: 0 8px 30px rgba(255, 136, 98, 0.35);
+}
+.btn-start:hover {
+  box-shadow: 0 10px 38px rgba(255, 136, 98, 0.5);
+  transform: translateY(-1px);
+}
+
+.btn-end {
+  background: rgba(255, 107, 107, 0.12);
+  color: #ffb4b4;
+  border-color: rgba(255, 107, 107, 0.45);
+}
+.btn-end:hover {
+  background: rgba(255, 107, 107, 0.2);
+  transform: translateY(-1px);
+}
+
+.btn-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* live telemetry dot */
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent, var(--neutral));
+  box-shadow: 0 0 0 0 var(--glow, var(--neutral-glow));
+}
+@media (prefers-reduced-motion: no-preference) {
+  .live-dot.pulsing {
+    animation: pulse-dot 1.6s ease-out infinite;
+  }
+}
+@keyframes pulse-dot {
+  0% {
+    box-shadow: 0 0 0 0 var(--glow);
+  }
+  70% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+/* ============================================================
+   Transcript
+   ============================================================ */
+
+.glass {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.turn-tag {
+  font-family: var(--font-mono), monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.18rem 0.5rem;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+.turn-tag.agent {
+  color: var(--maya);
+  background: color-mix(in srgb, var(--maya) 12%, transparent);
+  border-color: color-mix(in srgb, var(--maya) 30%, transparent);
+}
+.turn-tag.caller {
+  color: var(--caller);
+  background: color-mix(in srgb, var(--caller) 12%, transparent);
+  border-color: color-mix(in srgb, var(--caller) 30%, transparent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .turn-in {
+    animation: turn-in 0.32s ease both;
+  }
+}
+@keyframes turn-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.caret {
+  display: inline-block;
+  width: 0.5ch;
+  margin-left: 1px;
+  background: var(--maya);
+  color: transparent;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .caret {
+    animation: blink 1s steps(2) infinite;
+  }
+}
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* scrollbar */
+.scroll-area {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.scroll-area::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-area::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 8px;
 }
