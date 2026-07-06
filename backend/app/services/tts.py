@@ -2,6 +2,7 @@ import logging
 from collections.abc import AsyncIterator
 
 import edge_tts
+from elevenlabs import VoiceSettings
 from elevenlabs.client import AsyncElevenLabs
 from openai import AsyncOpenAI
 
@@ -62,10 +63,20 @@ async def _synthesize_elevenlabs(text: str) -> AsyncIterator[bytes]:
         voice_id=settings.elevenlabs_voice_id,
         text=text,
         model_id=settings.elevenlabs_model,
-        # Lower bitrate = faster first byte over the wire, still fine for voice.
-        output_format="mp3_44100_64",
-        # 0=default quality, 4=max latency optimization. 3 is the sweet spot.
-        optimize_streaming_latency=3,
+        # 128 kbps ~= the fidelity of the ElevenLabs website preview. Drop to
+        # mp3_44100_64 only if bandwidth/first-byte latency becomes a problem.
+        output_format="mp3_44100_128",
+        # No latency optimization -> full quality (levels 1-4 audibly degrade the
+        # voice). turbo_v2_5 is fast enough that this is still fine for live calls.
+        optimize_streaming_latency=0,
+        # Soft, calm, human delivery — slower pace, steady tone (see config.py).
+        voice_settings=VoiceSettings(
+            stability=settings.elevenlabs_stability,
+            similarity_boost=settings.elevenlabs_similarity,
+            style=settings.elevenlabs_style,
+            use_speaker_boost=settings.elevenlabs_speaker_boost,
+            speed=settings.elevenlabs_speed,
+        ),
     )
     async for chunk in stream:
         if chunk:

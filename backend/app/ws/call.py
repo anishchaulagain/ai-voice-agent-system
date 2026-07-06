@@ -111,6 +111,7 @@ async def handle_call(ws: WebSocket) -> None:
 
             if "bytes" in msg and msg["bytes"] is not None:
                 audio_buffer.extend(msg["bytes"])
+                log.info("audio chunk received: %d bytes (buffer=%d)", len(msg["bytes"]), len(audio_buffer))
                 continue
 
             if "text" not in msg or msg["text"] is None:
@@ -125,7 +126,9 @@ async def handle_call(ws: WebSocket) -> None:
             mtype = payload.get("type")
 
             if mtype == "user_audio_end":
+                log.info("user_audio_end received: buffer=%d bytes", len(audio_buffer))
                 if not audio_buffer:
+                    log.warning("user_audio_end with empty buffer — no audio arrived from client")
                     continue
                 blob = bytes(audio_buffer)
                 audio_buffer.clear()
@@ -137,6 +140,7 @@ async def handle_call(ws: WebSocket) -> None:
                     await _send_json(ws, {"type": "error", "message": f"STT error: {e}"})
                     continue
 
+                log.info("STT transcript: %r", text)
                 if not text:
                     await _send_json(ws, {"type": "user_transcript", "text": ""})
                     continue

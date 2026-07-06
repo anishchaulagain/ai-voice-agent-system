@@ -16,6 +16,23 @@ def _client() -> tuple[AsyncOpenAI, str]:
             AsyncOpenAI(api_key=settings.groq_api_key, base_url=settings.groq_base_url),
             settings.groq_llm_model,
         )
+    if settings.llm_provider == "openrouter":
+        if not settings.openrouter_api_key:
+            raise RuntimeError(
+                "OPENROUTER_API_KEY is not set but LLM_PROVIDER=openrouter"
+            )
+        return (
+            AsyncOpenAI(
+                api_key=settings.openrouter_api_key,
+                base_url=settings.openrouter_base_url,
+                # Optional attribution headers OpenRouter uses for ranking; harmless.
+                default_headers={
+                    "HTTP-Referer": "https://nexbizio.com",
+                    "X-Title": "Nexbizio Calling Agent",
+                },
+            ),
+            settings.openrouter_model,
+        )
     if not settings.openai_api_key:
         raise RuntimeError("OPENAI_API_KEY is not set but LLM_PROVIDER=openai")
     return AsyncOpenAI(api_key=settings.openai_api_key), settings.openai_llm_model
