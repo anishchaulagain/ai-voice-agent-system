@@ -1,10 +1,11 @@
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from fastapi import WebSocket, WebSocketDisconnect
 
 from app import conversation
-from app.services import llm, stt, tts
+from app.services import call_store, llm, stt, tts
 
 log = logging.getLogger(__name__)
 
@@ -89,6 +90,8 @@ async def _generate_and_speak_reply(ws: WebSocket, session: conversation.Session
 
 async def handle_call(ws: WebSocket) -> None:
     await ws.accept()
+    started_at = datetime.now(timezone.utc)
+    ended_reason = "disconnected"
     session = conversation.new_session()
     await _send_json(ws, {"type": "session", "session_id": session.id})
     log.info("call started: %s", session.id)
@@ -151,10 +154,12 @@ async def handle_call(ws: WebSocket) -> None:
                 ended = await _generate_and_speak_reply(ws, session)
                 if ended:
                     session.ended = True
+                    ended_reason = "agent_ended"
                     await _send_json(ws, {"type": "call_ended"})
                     break
 
             elif mtype == "end":
+                ended_reason = "user_ended"
                 break
 
             elif mtype == "ping":
@@ -167,6 +172,17 @@ async def handle_call(ws: WebSocket) -> None:
     except Exception:
         log.exception("call handler error")
     finally:
+        # Persist before dropping the session. Shielded so server-shutdown
+        # cancellation can't abort the write mid-way; BaseException so a
+        # CancelledError here can't skip drop_session/ws.close either.
+        try:
+            call_id = await asyncio.shield(
+                call_store.save_call(session, started_at, ended_reason)
+            )
+            if call_id:
+                call_store.schedule_extraction(call_id)
+        except BaseException:
+            log.exception("failed to persist call %s", session.id)
         conversation.drop_session(session.id)
         try:
             await ws.close()

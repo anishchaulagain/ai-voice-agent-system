@@ -1,3 +1,4 @@
+import time
 import uuid
 from dataclasses import dataclass, field
 
@@ -19,14 +20,18 @@ class Session:
     ended: bool = False
 
     def history_for_llm(self) -> list[dict]:
-        return [{"role": "system", "content": SYSTEM_PROMPT}, *self.messages]
+        # Strip the ts key — provider APIs reject unknown message fields.
+        return [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            *({"role": m["role"], "content": m["content"]} for m in self.messages),
+        ]
 
     def append_user(self, text: str) -> None:
-        self.messages.append({"role": "user", "content": text})
+        self.messages.append({"role": "user", "content": text, "ts": time.time()})
         self.user_turns += 1
 
     def append_assistant(self, text: str) -> None:
-        self.messages.append({"role": "assistant", "content": text})
+        self.messages.append({"role": "assistant", "content": text, "ts": time.time()})
 
     def can_end(self) -> bool:
         return self.user_turns >= MIN_USER_TURNS_BEFORE_END

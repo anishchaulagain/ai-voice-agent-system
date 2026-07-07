@@ -8,7 +8,8 @@ from app.config import settings
 log = logging.getLogger(__name__)
 
 
-def _client() -> tuple[AsyncOpenAI, str]:
+def get_client() -> tuple[AsyncOpenAI, str]:
+    """Return (client, default_model) for the configured LLM provider."""
     if settings.llm_provider == "groq":
         if not settings.groq_api_key:
             raise RuntimeError("GROQ_API_KEY is not set but LLM_PROVIDER=groq")
@@ -40,7 +41,7 @@ def _client() -> tuple[AsyncOpenAI, str]:
 
 async def stream_reply(messages: list[dict]) -> AsyncIterator[str]:
     """Yield text deltas from the chat model for the given message history."""
-    client, model = _client()
+    client, model = get_client()
     stream = await client.chat.completions.create(
         model=model,
         messages=messages,

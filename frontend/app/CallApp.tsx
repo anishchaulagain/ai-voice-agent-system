@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 const WS_URL =
@@ -429,7 +430,15 @@ export default function CallApp() {
               Voice Agent
             </span>
           </div>
-          <Telemetry status={status} seconds={seconds} />
+          <div className="flex items-center gap-5">
+            <Link
+              href="/dashboard"
+              className="mono text-[0.7rem] uppercase tracking-[0.14em] text-dim transition-colors hover:text-text"
+            >
+              Dashboard
+            </Link>
+            <Telemetry status={status} seconds={seconds} />
+          </div>
         </header>
 
         {/* hero: the call console */}

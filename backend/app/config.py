@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     elevenlabs_style: float = 0.0  # 0 = natural; higher exaggerates style + adds latency
     elevenlabs_speaker_boost: bool = True
 
+    # Call recording / lead extraction. Postgres later = swap the URL
+    # (e.g. postgresql+asyncpg://...) and pip install asyncpg.
+    database_url: str = "sqlite+aiosqlite:///./data/calls.db"
+    extraction_model: str = ""  # empty = the active LLM provider's default model
+    extraction_max_tokens: int = 1200
+
     host: str = "0.0.0.0"
     port: int = 8000
     cors_origins: str = "http://localhost:3000"

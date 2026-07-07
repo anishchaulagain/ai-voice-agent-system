@@ -379,6 +379,66 @@ body {
   }
 }
 
+/* ============================================================
+   Dashboard
+   ============================================================ */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-mono), monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.18rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.pill-hot {
+  color: var(--maya);
+  background: color-mix(in srgb, var(--maya) 12%, transparent);
+  border-color: color-mix(in srgb, var(--maya) 30%, transparent);
+}
+.pill-ok {
+  color: var(--caller);
+  background: color-mix(in srgb, var(--caller) 10%, transparent);
+  border-color: color-mix(in srgb, var(--caller) 28%, transparent);
+}
+.pill-warm {
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--neutral) 14%, transparent);
+  border-color: color-mix(in srgb, var(--neutral) 32%, transparent);
+}
+.pill-dim {
+  color: var(--text-faint);
+  background: color-mix(in srgb, var(--neutral) 8%, transparent);
+  border-color: color-mix(in srgb, var(--neutral) 20%, transparent);
+}
+.pill-danger {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .pill-pulse {
+    animation: pill-pulse 1.8s ease-in-out infinite;
+  }
+}
+@keyframes pill-pulse {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+.row-link {
+  transition: background 0.15s ease;
+  cursor: pointer;
+}
+.row-link:hover {
+  background: color-mix(in srgb, var(--panel-solid) 60%, transparent);
+}
+
 /* scrollbar */
 .scroll-area {
   scrollbar-width: thin;

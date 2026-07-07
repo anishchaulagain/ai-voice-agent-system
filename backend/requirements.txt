@@ -8,3 +8,5 @@ edge-tts==7.2.8
 elevenlabs==1.59.0
 websockets==14.1
 python-multipart==0.0.20
+sqlalchemy[asyncio]==2.0.36
+aiosqlite==0.20.0

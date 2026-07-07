@@ -1,9 +1,12 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.calls import router as calls_router
 from app.config import settings
+from app.db import init_db
 from app.ws.call import handle_call
 
 logging.basicConfig(
@@ -11,7 +14,14 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
-app = FastAPI(title="Nexbizio Calling Agent")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    yield
+
+
+app = FastAPI(title="Nexbizio Calling Agent", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,6 +30,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+app.include_router(calls_router)
 
 
 @app.get("/health")
